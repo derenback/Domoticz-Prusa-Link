@@ -111,7 +111,8 @@ class BasePlugin:
                     Devices[4].Update(nValue=1, sValue=f"{result['nozzle_target']:.1f}")
                     Devices[5].Update(nValue=1, sValue=f"{result['progress']:.1f}")
                     if result['filename'] != self.last_filename:
-                        Devices[6].Update(nValue=0, sValue=result['filename'])
+                        if result['filename'] != 'No job':
+                            Devices[6].Update(nValue=0, sValue=result['filename'])
                         self.last_filename = result['filename']
                     Devices[7].Update(nValue=1, sValue=f"{result['fan_hotend']}")
                     Devices[8].Update(nValue=1, sValue=f"{result['fan_print']}")
@@ -123,6 +124,8 @@ class BasePlugin:
                             Domoticz.Log(f"PRUSALINK Progress: {result['progress']:.1f}% - {result['filename']}")
                         elif result['filename'] != 'No job':
                             Domoticz.Log(f"PRUSALINK File: {result['filename']}")                        
+                        Domoticz.Log(f"PRUSALINK Fan Hotend: {result['fan_hotend']}%")
+                        Domoticz.Log(f"PRUSALINK Fan Print:  {result['fan_print']}%")
                 else:
                     Domoticz.Log("PRUSALINK No data available")
             else:
