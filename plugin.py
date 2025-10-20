@@ -51,6 +51,10 @@ class BasePlugin:
             Domoticz.Device(Name="Progress", Unit=5, Type=243, Subtype=6, Used=1).Create()
         if 6 not in Devices:
             Domoticz.Device(Name="Filename", Unit=6, Type=243, Subtype=19, Used=1).Create()
+        if 7 not in Devices:
+            Domoticz.Device(Name="Fan hotend", Unit=7, Type=243, Subtype=6, Used=1).Create()
+        if 8 not in Devices:
+            Domoticz.Device(Name="Fan print", Unit=8, Type=243, Subtype=6, Used=1).Create()
 
         # Just keeping the plugin alive. 
         Domoticz.Heartbeat(5)
@@ -79,7 +83,9 @@ class BasePlugin:
                     'nozzle_target': printer.get('target_nozzle', 0),
                     'bed_temp': printer.get('temp_bed', 0),
                     'bed_target': printer.get('target_bed', 0),
-                    'status': printer.get('state', 'UNKNOWN')
+                    'status': printer.get('state', 'UNKNOWN'),
+                    'fan_hotend': printer.get('fan_hotend', 0),
+                    'fan_print': printer.get('fan_print', 0)
                 }
                 
                 # Try to get job progress
@@ -107,6 +113,8 @@ class BasePlugin:
                     if result['filename'] != self.last_filename:
                         Devices[6].Update(nValue=0, sValue=result['filename'])
                         self.last_filename = result['filename']
+                    Devices[7].Update(nValue=1, sValue=f"{result['fan_hotend']}")
+                    Devices[8].Update(nValue=1, sValue=f"{result['fan_print']}")
 
                     if (Parameters["Mode4"] == "Debug"):
                         Domoticz.Log(f"PRUSALINK Bed: {result['bed_temp']:.1f}°C → {result['bed_target']:.1f}°C")
