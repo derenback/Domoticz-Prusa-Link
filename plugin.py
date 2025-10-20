@@ -52,9 +52,9 @@ class BasePlugin:
         if 6 not in Devices:
             Domoticz.Device(Name="Filename", Unit=6, Type=243, Subtype=19, Used=1).Create()
         if 7 not in Devices:
-            Domoticz.Device(Name="Fan hotend", Unit=7, Type=243, Subtype=6, Used=1).Create()
+            Domoticz.Device(Name="Fan hotend", Unit=7, Type=243, Subtype=7, Used=1).Create()
         if 8 not in Devices:
-            Domoticz.Device(Name="Fan print", Unit=8, Type=243, Subtype=6, Used=1).Create()
+            Domoticz.Device(Name="Fan print", Unit=8, Type=243, Subtype=7, Used=1).Create()
 
         # Just keeping the plugin alive. 
         Domoticz.Heartbeat(5)

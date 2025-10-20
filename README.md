@@ -56,8 +56,8 @@ The plugin creates the following devices in Domoticz:
 4. **Nozzle Target** - Target nozzle temperature (°C)
 5. **Progress** - Print progress percentage (%)
 6. **Filename** - Currently printing filename
-7. **Fan hotend** - Hotend fan speed (%)
-8. **Fan print** - Print fan speed (%)
+7. **Fan hotend** - Hotend fan speed (rpm)
+8. **Fan print** - Print fan speed (rpm)
 
 ## Usage
 
