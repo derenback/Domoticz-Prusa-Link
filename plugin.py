@@ -25,115 +25,118 @@ import requests
 import json
 
 class BasePlugin:
-    ip_address = ""
-    api_key = ""
-    last_filename = ""
+    # Device configuration: unit -> (name, type, subtype)
+    DEVICES = {
+        1: ("Bed", 80, 5),
+        2: ("Bed Target", 80, 5),
+        3: ("Nozzle", 80, 5),
+        4: ("Nozzle Target", 80, 5),
+        5: ("Progress", 243, 6),
+        6: ("Filename", 243, 19),
+        7: ("Fan hotend", 243, 7),
+        8: ("Fan print", 243, 7),
+    }
+    
+    # API endpoints
+    STATUS_ENDPOINT = "/api/v1/status"
+    JOB_ENDPOINT = "/api/v1/job"
+    
+    def __init__(self):
+        self.ip_address = ""
+        self.api_key = ""
+        self.last_filename = ""
+        self.session = None
+        self.debug = False
 
     def onStart(self):
         Domoticz.Log("Domoticz Prusa link plugin started")
 
         self.ip_address = Parameters["Mode2"].strip()
         self.api_key = Parameters["Mode3"].strip()
-
-        if (Parameters["Mode4"] == "Debug"):
-            Domoticz.Log("PRUSALINK Debug is On")
-            Domoticz.Log(f"PRUSALINK ip_address: {self.ip_address}")
-
-        if 1 not in Devices:
-            Domoticz.Device(Name="Bed", Unit=1, Type=80, Subtype=5, Used=1).Create()
-        if 2 not in Devices:
-            Domoticz.Device(Name="Bed Target", Unit=2, Type=80, Subtype=5, Used=1).Create()
-        if 3 not in Devices:
-            Domoticz.Device(Name="Nozzle", Unit=3, Type=80, Subtype=5, Used=1).Create()
-        if 4 not in Devices:
-            Domoticz.Device(Name="Nozzle Target", Unit=4, Type=80, Subtype=5, Used=1).Create()
-        if 5 not in Devices:
-            Domoticz.Device(Name="Progress", Unit=5, Type=243, Subtype=6, Used=1).Create()
-        if 6 not in Devices:
-            Domoticz.Device(Name="Filename", Unit=6, Type=243, Subtype=19, Used=1).Create()
-        if 7 not in Devices:
-            Domoticz.Device(Name="Fan hotend", Unit=7, Type=243, Subtype=7, Used=1).Create()
-        if 8 not in Devices:
-            Domoticz.Device(Name="Fan print", Unit=8, Type=243, Subtype=7, Used=1).Create()
-
-        # Just keeping the plugin alive. 
+        self.debug = Parameters["Mode4"] == "Debug"
+        
+        # Setup session
+        self.session = requests.Session()
+        self.session.headers.update({
+            'X-Api-Key': self.api_key,
+            'Accept': 'application/json'
+        })
+        
+        if self.debug:
+            Domoticz.Log(f"PRUSALINK Debug enabled for IP: {self.ip_address}")
+        
+        # Create devices
+        for unit, (name, type_val, subtype) in self.DEVICES.items():
+            if unit not in Devices:
+                Domoticz.Device(Name=name, Unit=unit, Type=type_val, Subtype=subtype, Used=1).Create()
+        
         Domoticz.Heartbeat(5)
 
     def onStop(self):
         Domoticz.Log("PRUSALINK Stopped")
+        if self.session:
+            self.session.close()
 
     def onHeartbeat(self):
-        if (Parameters["Mode4"] == "Debug"):
+        if self.debug:
             Domoticz.Log("PRUSALINK Heartbeat")
-        session = requests.Session()
-        session.headers.update({
-            'X-Api-Key': self.api_key,
-            'Accept': 'application/json'
-        })
-
-        # Get temperature and progress data
+        
         try:
-            response = session.get(f"http://{self.ip_address}/api/v1/status", timeout=2)
-            if response.status_code == 200:
-                data = response.json()
-                printer = data.get('printer', {})
-
-                result = {
-                    'nozzle_temp': printer.get('temp_nozzle', 0),
-                    'nozzle_target': printer.get('target_nozzle', 0),
-                    'bed_temp': printer.get('temp_bed', 0),
-                    'bed_target': printer.get('target_bed', 0),
-                    'status': printer.get('state', 'UNKNOWN'),
-                    'fan_hotend': printer.get('fan_hotend', 0),
-                    'fan_print': printer.get('fan_print', 0)
-                }
-                
-                # Try to get job progress
-                try:
-                    job_response = session.get(f"http://{self.ip_address}/api/v1/job", timeout=2)
-                    if job_response.status_code == 200:
-                        job_data = job_response.json()
-                        result['progress'] = job_data.get('progress', 0)
-                        result['filename'] = job_data.get('file', {}).get('display_name', 'No file')
-                    else:
-                        result['progress'] = 0
-                        result['filename'] = 'No job'
-                except Exception as e:
-                    Domoticz.Log(f"PRUSALINK Error getting job data: {e}")
-                    result['progress'] = 0
-                    result['filename'] = 'Unknown'
-                
-                # Print status in a clean format
-                if result:
-                    Devices[1].Update(nValue=1, sValue=f"{result['bed_temp']:.1f}")
-                    Devices[2].Update(nValue=1, sValue=f"{result['bed_target']:.1f}")
-                    Devices[3].Update(nValue=1, sValue=f"{result['nozzle_temp']:.1f}")
-                    Devices[4].Update(nValue=1, sValue=f"{result['nozzle_target']:.1f}")
-                    Devices[5].Update(nValue=1, sValue=f"{result['progress']:.1f}")
-                    if result['filename'] != self.last_filename:
-                        if result['filename'] != 'No job':
-                            Devices[6].Update(nValue=0, sValue=result['filename'])
-                        self.last_filename = result['filename']
-                    Devices[7].Update(nValue=1, sValue=f"{result['fan_hotend']}")
-                    Devices[8].Update(nValue=1, sValue=f"{result['fan_print']}")
-
-                    if (Parameters["Mode4"] == "Debug"):
-                        Domoticz.Log(f"PRUSALINK Bed: {result['bed_temp']:.1f}°C → {result['bed_target']:.1f}°C")
-                        Domoticz.Log(f"PRUSALINK Nozzle: {result['nozzle_temp']:.1f}°C → {result['nozzle_target']:.1f}°C")
-                        if result['progress'] > 0:
-                            Domoticz.Log(f"PRUSALINK Progress: {result['progress']:.1f}% - {result['filename']}")
-                        elif result['filename'] != 'No job':
-                            Domoticz.Log(f"PRUSALINK File: {result['filename']}")                        
-                        Domoticz.Log(f"PRUSALINK Fan Hotend: {result['fan_hotend']}%")
-                        Domoticz.Log(f"PRUSALINK Fan Print:  {result['fan_print']}%")
-                else:
-                    Domoticz.Log("PRUSALINK No data available")
-            else:
-                Domoticz.Log("PRUSALINK Failed to get status data")
+            printer_data = self._fetch_api(self.STATUS_ENDPOINT)
+            job_data = self._fetch_api(self.JOB_ENDPOINT)
+            
+            if printer_data:
+                self._update_all_devices(printer_data, job_data)
                 
         except Exception as e:
-            Domoticz.Log(f"PRUSALINK Error getting data: {e}")
-                
+            Domoticz.Log(f"PRUSALINK Error in heartbeat: {e}")
+
+    def _fetch_api(self, endpoint):
+        """Fetch data from API endpoint"""
+        try:
+            response = self.session.get(f"http://{self.ip_address}{endpoint}", timeout=2)
+            return response.json() if response.status_code == 200 else None
+        except requests.exceptions.RequestException as e:
+            Domoticz.Log(f"PRUSALINK Error fetching {endpoint}: {e}")
+            return None
+
+    def _update_all_devices(self, status_data, job_data):
+        """Update all devices with latest data"""
+        if not status_data:
+            return
+            
+        printer = status_data.get('printer', {})
+        
+        # Temperature devices
+        self._update_device(1, printer.get('temp_bed', 0))
+        self._update_device(2, printer.get('target_bed', 0))
+        self._update_device(3, printer.get('temp_nozzle', 0))
+        self._update_device(4, printer.get('target_nozzle', 0))
+        
+        # Fan devices
+        self._update_device(7, printer.get('fan_hotend', 0))
+        self._update_device(8, printer.get('fan_print', 0))
+        
+        # Job devices
+        if job_data:
+            progress = job_data.get('progress', 0)
+            filename = job_data.get('file', {}).get('display_name', 'No file')
+            
+            self._update_device(5, progress)
+            
+            # Only update filename when it changes
+            if filename != self.last_filename and filename != 'No job':
+                Devices[6].Update(nValue=0, sValue=str(filename))
+                self.last_filename = filename
+                if self.debug:
+                    Domoticz.Log(f"PRUSALINK Updated Filename to {filename}")
+            
+    def _update_device(self, unit, value):
+        """Generic device update method"""
+        if unit in Devices:
+            Devices[unit].Update(nValue=1, sValue=f"{value:.1f}" if isinstance(value, float) else str(value))
+            if self.debug:
+                Domoticz.Log(f"PRUSALINK Updated {self.DEVICES[unit][0]} to {value}")
 
 global _plugin
 _plugin = BasePlugin()
