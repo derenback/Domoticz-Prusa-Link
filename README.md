@@ -46,6 +46,24 @@ A Domoticz plugin to monitor Prusa 3D printers via PrusaLink API.
 2. Go to the settings page
 3. Copy the key to the plugin configuration
 
+## Testing the Connection
+
+Before setting up the plugin in Domoticz, you can test the connection to your printer using the included test script:
+
+```bash
+python3 test.py --ip <PRINTER_IP> --api-key <YOUR_API_KEY>
+```
+Replace `<PRINTER_IP>` and `<YOUR_API_KEY>` with your printer's IP address and API key.
+
+The test script will display:
+- Connection status and response codes
+- Current printer state (PRINTING, IDLE, STOPPED, etc.)
+- Real-time temperature readings (nozzle and bed)
+- Fan speeds
+- Print progress and filename (if printing)
+
+This helps verify your IP address and API key are correct before configuring the Domoticz plugin.
+
 ## Created Devices
 
 The plugin creates the following devices in Domoticz:
