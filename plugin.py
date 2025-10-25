@@ -122,15 +122,17 @@ class BasePlugin:
             progress = job_data.get('progress', 0)
             filename = job_data.get('file', {}).get('display_name', 'No file')
             
-            self._update_device(5, progress)
-            
             # Only update filename when it changes
             if filename != self.last_filename and filename != 'No job':
                 Devices[6].Update(nValue=0, sValue=str(filename))
                 self.last_filename = filename
                 if self.debug:
                     Domoticz.Log(f"PRUSALINK Updated Filename to {filename}")
-            
+        else:
+            progress = 0
+
+        self._update_device(5, progress)
+
     def _update_device(self, unit, value):
         """Generic device update method"""
         if unit in Devices:
