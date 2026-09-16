@@ -126,6 +126,10 @@ Derenback
 
 ## Version History
 
+- **0.0.2** - Improved monitoring and reliability
+  - Improve readability
+  - Corrected fan speed units
+
 - **0.0.1** - Initial release
   - Basic temperature monitoring
   - Print progress tracking

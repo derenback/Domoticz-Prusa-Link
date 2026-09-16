@@ -4,7 +4,7 @@ Prusa Link for Domoticz
 Author: Derenback
 """
 """
-<plugin key="PRUSALINK" name="Prusa-Link" version="0.0.1" author="Derenback">
+<plugin key="PRUSALINK" name="Prusa-Link" version="0.0.2" author="Derenback">
     <description>
         <h2>PrusaLink plugin</h2><br/>
     </description>
@@ -25,16 +25,44 @@ import requests
 import json
 
 class BasePlugin:
+    # Domoticz device units
+    UNIT_BED = 1
+    UNIT_BED_TARGET = 2
+    UNIT_NOZZLE = 3
+    UNIT_NOZZLE_TARGET = 4
+    UNIT_PROGRESS = 5
+    UNIT_FILENAME = 6
+    UNIT_FAN_HOTEND = 7
+    UNIT_FAN_PRINT = 8
+
+    # Domoticz device types and subtypes
+    TYPE_TEMPERATURE = 80
+    SUBTYPE_CELSIUS = 5
+    TYPE_GENERAL = 243
+    SUBTYPE_PERCENTAGE = 6
+    SUBTYPE_TEXT = 19
+    SUBTYPE_FAN = 7
+
+    HEARTBEAT_SECONDS = 5
+    REQUEST_TIMEOUT_SECONDS = 2
+    HTTP_OK = 200
+    DEVICE_USED = 1
+    UPDATE_VALUE = 1
+    NO_UPDATE_VALUE = 0
+    DEFAULT_SENSOR_VALUE = 0
+    NO_FILE = "No file"
+    NO_JOB = "No job"
+
     # Device configuration: unit -> (name, type, subtype)
     DEVICES = {
-        1: ("Bed", 80, 5),
-        2: ("Bed Target", 80, 5),
-        3: ("Nozzle", 80, 5),
-        4: ("Nozzle Target", 80, 5),
-        5: ("Progress", 243, 6),
-        6: ("Filename", 243, 19),
-        7: ("Fan hotend", 243, 7),
-        8: ("Fan print", 243, 7),
+        UNIT_BED: ("Bed", TYPE_TEMPERATURE, SUBTYPE_CELSIUS),
+        UNIT_BED_TARGET: ("Bed Target", TYPE_TEMPERATURE, SUBTYPE_CELSIUS),
+        UNIT_NOZZLE: ("Nozzle", TYPE_TEMPERATURE, SUBTYPE_CELSIUS),
+        UNIT_NOZZLE_TARGET: ("Nozzle Target", TYPE_TEMPERATURE, SUBTYPE_CELSIUS),
+        UNIT_PROGRESS: ("Progress", TYPE_GENERAL, SUBTYPE_PERCENTAGE),
+        UNIT_FILENAME: ("Filename", TYPE_GENERAL, SUBTYPE_TEXT),
+        UNIT_FAN_HOTEND: ("Fan hotend", TYPE_GENERAL, SUBTYPE_FAN),
+        UNIT_FAN_PRINT: ("Fan print", TYPE_GENERAL, SUBTYPE_FAN),
     }
     
     # API endpoints
@@ -68,9 +96,15 @@ class BasePlugin:
         # Create devices
         for unit, (name, type_val, subtype) in self.DEVICES.items():
             if unit not in Devices:
-                Domoticz.Device(Name=name, Unit=unit, Type=type_val, Subtype=subtype, Used=1).Create()
+                Domoticz.Device(
+                    Name=name,
+                    Unit=unit,
+                    Type=type_val,
+                    Subtype=subtype,
+                    Used=self.DEVICE_USED,
+                ).Create()
         
-        Domoticz.Heartbeat(5)
+        Domoticz.Heartbeat(self.HEARTBEAT_SECONDS)
 
     def onStop(self):
         Domoticz.Log("PRUSALINK Stopped")
@@ -94,8 +128,11 @@ class BasePlugin:
     def _fetch_api(self, endpoint):
         """Fetch data from API endpoint"""
         try:
-            response = self.session.get(f"http://{self.ip_address}{endpoint}", timeout=2)
-            return response.json() if response.status_code == 200 else None
+            response = self.session.get(
+                f"http://{self.ip_address}{endpoint}",
+                timeout=self.REQUEST_TIMEOUT_SECONDS,
+            )
+            return response.json() if response.status_code == self.HTTP_OK else None
         except requests.exceptions.RequestException as e:
             Domoticz.Log(f"PRUSALINK Error fetching {endpoint}: {e}")
             return None
@@ -108,35 +145,35 @@ class BasePlugin:
         printer = status_data.get('printer', {})
         
         # Temperature devices
-        self._update_device(1, printer.get('temp_bed', 0))
-        self._update_device(2, printer.get('target_bed', 0))
-        self._update_device(3, printer.get('temp_nozzle', 0))
-        self._update_device(4, printer.get('target_nozzle', 0))
+        self._update_device(self.UNIT_BED, printer.get('temp_bed', self.DEFAULT_SENSOR_VALUE))
+        self._update_device(self.UNIT_BED_TARGET, printer.get('target_bed', self.DEFAULT_SENSOR_VALUE))
+        self._update_device(self.UNIT_NOZZLE, printer.get('temp_nozzle', self.DEFAULT_SENSOR_VALUE))
+        self._update_device(self.UNIT_NOZZLE_TARGET, printer.get('target_nozzle', self.DEFAULT_SENSOR_VALUE))
         
         # Fan devices
-        self._update_device(7, printer.get('fan_hotend', 0))
-        self._update_device(8, printer.get('fan_print', 0))
+        self._update_device(self.UNIT_FAN_HOTEND, printer.get('fan_hotend', self.DEFAULT_SENSOR_VALUE))
+        self._update_device(self.UNIT_FAN_PRINT, printer.get('fan_print', self.DEFAULT_SENSOR_VALUE))
         
         # Job devices
         if job_data:
-            progress = job_data.get('progress', 0)
-            filename = job_data.get('file', {}).get('display_name', 'No file')
+            progress = job_data.get('progress', self.DEFAULT_SENSOR_VALUE)
+            filename = job_data.get('file', {}).get('display_name', self.NO_FILE)
             
             # Only update filename when it changes
-            if 6 in Devices and filename != self.last_filename and filename != 'No job':
-                Devices[6].Update(nValue=0, sValue=str(filename))
+            if self.UNIT_FILENAME in Devices and filename != self.last_filename and filename != self.NO_JOB:
+                Devices[self.UNIT_FILENAME].Update(nValue=self.NO_UPDATE_VALUE, sValue=str(filename))
                 self.last_filename = filename
                 if self.debug:
                     Domoticz.Log(f"PRUSALINK Updated Filename to {filename}")
         else:
-            progress = 0
+            progress = self.DEFAULT_SENSOR_VALUE
 
-        self._update_device(5, progress)
+        self._update_device(self.UNIT_PROGRESS, progress)
 
     def _update_device(self, unit, value):
         """Generic device update method"""
         if unit in Devices:
-            Devices[unit].Update(nValue=1, sValue=f"{value:.1f}" if isinstance(value, float) else str(value))
+            Devices[unit].Update(nValue=self.UPDATE_VALUE, sValue=f"{value:.1f}" if isinstance(value, float) else str(value))
             if self.debug:
                 Domoticz.Log(f"PRUSALINK Updated {self.DEVICES[unit][0]} to {value}")
 
