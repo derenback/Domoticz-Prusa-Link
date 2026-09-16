@@ -123,7 +123,7 @@ class BasePlugin:
             filename = job_data.get('file', {}).get('display_name', 'No file')
             
             # Only update filename when it changes
-            if filename != self.last_filename and filename != 'No job':
+            if 6 in Devices and filename != self.last_filename and filename != 'No job':
                 Devices[6].Update(nValue=0, sValue=str(filename))
                 self.last_filename = filename
                 if self.debug:
