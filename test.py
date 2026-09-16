@@ -48,10 +48,10 @@ def main():
     # Display formatted output
     timestamp = datetime.now().strftime("%H:%M:%S")
     print(f"[{timestamp}] {printer.get('state', 'UNKNOWN')}")
-    print(f"  Nozzle: {printer.get('temp_nozzle', 0):.1f}°C → {printer.get('target_nozzle', 0):.1f}°C")
-    print(f"  Bed:    {printer.get('temp_bed', 0):.1f}°C → {printer.get('target_bed', 0):.1f}°C")
-    print(f"  Fan Hotend: {printer.get('fan_hotend', 0)}%")
-    print(f"  Fan Print:  {printer.get('fan_print', 0)}%")
+    print(f"  Nozzle: {printer.get('temp_nozzle', 0):.1f} °C → {printer.get('target_nozzle', 0):.1f} °C")
+    print(f"  Bed:    {printer.get('temp_bed', 0):.1f} °C → {printer.get('target_bed', 0):.1f} °C")
+    print(f"  Fan Hotend: {printer.get('fan_hotend', 0)} RPM")
+    print(f"  Fan Print:  {printer.get('fan_print', 0)} RPM")
     
     # Display job info if available
     if job_data:
