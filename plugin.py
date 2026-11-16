@@ -123,11 +123,11 @@ class BasePlugin:
                     config["Options"] = {"Custom": "1;min"}
                 Domoticz.Device(**config).Create()
             if unit in self.TIME_UNITS and unit in Devices:
-                Devices[unit].TimedOut = 1
+                self._mark_device_unavailable(unit)
 
         for unit in self.LEGACY_TIME_UNITS:
             if unit in Devices:
-                Devices[unit].TimedOut = 1
+                self._mark_device_unavailable(unit)
                 Domoticz.Log(f"PRUSALINK Legacy time device {unit} is no longer updated; see README for migration")
         
         Domoticz.Heartbeat(self.HEARTBEAT_SECONDS)
@@ -187,6 +187,8 @@ class BasePlugin:
             if device.nValue != value or device.sValue != message:
                 device.Update(nValue=value, sValue=message)
                 Domoticz.Log(f"PRUSALINK {message}")
+            else:
+                device.Touch()
 
     def _update_all_devices(self, status_data, job_data):
         """Update all devices with latest data"""
@@ -210,12 +212,14 @@ class BasePlugin:
             progress = job_data.get('progress', self.DEFAULT_SENSOR_VALUE)
             filename = job_data.get('file', {}).get('display_name', self.NO_FILE)
             
-            # Only update filename when it changes
-            if self.UNIT_FILENAME in Devices and filename != self.last_filename and filename != self.NO_JOB:
-                Devices[self.UNIT_FILENAME].Update(nValue=self.NO_UPDATE_VALUE, sValue=str(filename))
-                self.last_filename = filename
-                if self.debug:
-                    Domoticz.Log(f"PRUSALINK Updated Filename to {filename}")
+            if self.UNIT_FILENAME in Devices and filename != self.NO_JOB:
+                if filename != self.last_filename:
+                    Devices[self.UNIT_FILENAME].Update(nValue=self.NO_UPDATE_VALUE, sValue=str(filename))
+                    self.last_filename = filename
+                    if self.debug:
+                        Domoticz.Log(f"PRUSALINK Updated Filename to {filename}")
+                else:
+                    Devices[self.UNIT_FILENAME].Touch()
         else:
             progress = self.DEFAULT_SENSOR_VALUE
 
@@ -225,14 +229,18 @@ class BasePlugin:
     def _update_job_times(self, status_data, job_data):
         status_job = status_data.get('job') or {}
         job = job_data or status_job
-        remaining = self._valid_seconds(job.get('time_remaining'))
-        elapsed = self._valid_seconds(job.get('time_printing'))
+        state = status_data.get('printer', {}).get('state')
+        if state in ('IDLE', 'STOPPED'):
+            remaining = elapsed = 0
+        else:
+            remaining = self._valid_seconds(job.get('time_remaining'))
+            elapsed = self._valid_seconds(job.get('time_printing'))
 
         self._update_duration(self.UNIT_TIME_REMAINING, remaining)
         self._update_duration(self.UNIT_TIME_ELAPSED, elapsed)
 
         finish = self.TIME_UNAVAILABLE
-        if remaining is not None and status_data.get('printer', {}).get('state') == 'PRINTING':
+        if remaining is not None and state == 'PRINTING':
             try:
                 finish = datetime.fromtimestamp(time.time() + remaining).strftime('%Y-%m-%d %H:%M')
             except (OverflowError, OSError, ValueError) as e:
@@ -248,15 +256,28 @@ class BasePlugin:
     def _mark_times_unavailable(self):
         for unit in self.TIME_UNITS:
             if unit in Devices:
-                Devices[unit].TimedOut = 1
+                self._mark_device_unavailable(unit)
+
+    def _mark_device_unavailable(self, unit):
+        device = Devices[unit]
+        if not device.TimedOut:
+            device.Update(
+                nValue=device.nValue, sValue=str(device.sValue),
+                TimedOut=1, SuppressTriggers=True,
+            )
 
     def _update_duration(self, unit, seconds):
         if unit not in Devices:
             return
         if seconds is None:
-            Devices[unit].TimedOut = 1
+            self._mark_device_unavailable(unit)
         else:
-            Devices[unit].Update(nValue=0, sValue=f"{seconds / 60:.2f}", TimedOut=0)
+            device = Devices[unit]
+            value = f"{seconds / 60:.2f}"
+            if not device.TimedOut and device.nValue == 0 and device.sValue == value:
+                device.Touch()
+            else:
+                device.Update(nValue=0, sValue=value, TimedOut=0)
 
     def _update_device(self, unit, value):
         """Generic device update method"""

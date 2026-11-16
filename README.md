@@ -15,7 +15,7 @@ A Domoticz plugin to monitor Prusa 3D printers via PrusaLink API.
 
 ## Requirements
 
-- Domoticz home automation system
+- Domoticz with support for `SuppressTriggers` on Python device updates
 - Prusa 3D printer with PrusaLink enabled
 - Python 3.x with `requests` library
 - Network access between Domoticz and the printer
@@ -83,12 +83,15 @@ The plugin creates the following devices in Domoticz:
 13. **Time remaining** - Estimated remaining time (numeric, minutes)
 14. **Time elapsed** - Elapsed print time (numeric, minutes)
 
-When a duration is unavailable, its numeric device is marked timed out (red
-header) and retains its last reading; the value may be stale and should not be
-treated as zero. Check the timeout state when using it in automations. New
-devices can show an initial zero before their first reading, also marked timed
-out. The finish time is shown as "Unavailable" unless the printer is printing
-and provides a remaining time. It is an estimate and can change during a print.
+When the printer is idle or a print is stopped, durations reset to zero.
+Unchanged duration and connection readings are refreshed so they do not
+become stale. When a duration is unavailable during a job, its numeric device
+is marked timed out (red header) and retains its last reading; the value may be
+stale and should not be treated as zero. Check the timeout state when using it
+in automations. New devices can show an initial zero before their first reading,
+also marked timed out. The finish time is shown as "Unavailable" unless the
+printer is printing and provides a remaining time. It is an estimate and can
+change during a print.
 
 ### Upgrading time devices
 

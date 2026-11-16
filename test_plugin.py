@@ -11,11 +11,31 @@ sys.modules.setdefault("Domoticz", types.ModuleType("Domoticz"))
 import plugin
 
 
+class FakeDevice:
+    def __init__(self, value="0"):
+        self.nValue = 0
+        self.sValue = value
+        self._timed_out = 0
+        self.Update = Mock(side_effect=self._update)
+        self.Touch = Mock()
+
+    @property
+    def TimedOut(self):
+        return self._timed_out
+
+    def _update(self, nValue, sValue, TimedOut=None, SuppressTriggers=False):
+        if TimedOut is not None:
+            self._timed_out = TimedOut
+        if not SuppressTriggers:
+            self.nValue = nValue
+            self.sValue = sValue
+
+
 class PrintTimeTests(unittest.TestCase):
     def setUp(self):
         self.plugin = plugin.BasePlugin()
         self.devices = {
-            unit: Mock()
+            unit: FakeDevice()
             for unit in (
                 self.plugin.UNIT_TIME_REMAINING,
                 self.plugin.UNIT_TIME_ELAPSED,
@@ -52,17 +72,23 @@ class PrintTimeTests(unittest.TestCase):
             nValue=0, sValue="0.00", TimedOut=0
         )
         self.assertEqual(self.devices[self.plugin.UNIT_TIME_ELAPSED].TimedOut, 1)
-        self.devices[self.plugin.UNIT_TIME_ELAPSED].Update.assert_not_called()
+        self.devices[self.plugin.UNIT_TIME_ELAPSED].Update.assert_called_once_with(
+            nValue=0, sValue="0", TimedOut=1, SuppressTriggers=True
+        )
         self.assertEqual(self.value(self.plugin.UNIT_FINISH_TIME), "Unavailable")
 
         for device in self.devices.values():
-            device.reset_mock()
+            device.Update.reset_mock()
         self.plugin._update_job_times(
             {"printer": {"state": "PRINTING"}},
             {"time_remaining": -1, "time_printing": None},
         )
+        remaining = self.devices[self.plugin.UNIT_TIME_REMAINING]
+        remaining.Update.assert_called_once_with(
+            nValue=0, sValue="0.00", TimedOut=1, SuppressTriggers=True
+        )
+        self.devices[self.plugin.UNIT_TIME_ELAPSED].Update.assert_not_called()
         for unit in self.plugin.TIME_UNITS:
-            self.devices[unit].Update.assert_not_called()
             self.assertEqual(self.devices[unit].TimedOut, 1)
         self.assertEqual(self.value(self.plugin.UNIT_FINISH_TIME), "Unavailable")
 
@@ -72,25 +98,70 @@ class PrintTimeTests(unittest.TestCase):
             {"time_remaining": 30, "time_printing": 60},
         )
         for device in self.devices.values():
-            device.reset_mock()
+            device.Update.reset_mock()
         self.plugin._update_job_times({"printer": {"state": "IDLE"}}, None)
         for unit in self.plugin.TIME_UNITS:
-            self.devices[unit].Update.assert_not_called()
-            self.assertEqual(self.devices[unit].TimedOut, 1)
+            self.devices[unit].Update.assert_called_once_with(
+                nValue=0, sValue="0.00", TimedOut=0
+            )
+            self.assertEqual(self.devices[unit].TimedOut, 0)
         self.assertEqual(self.value(self.plugin.UNIT_FINISH_TIME), "Unavailable")
+
+    def test_stopped_job_resets_even_if_api_returns_old_job(self):
+        self.plugin._update_job_times(
+            {"printer": {"state": "STOPPED"}, "job": {"time_remaining": 200}},
+            {"time_remaining": 200, "time_printing": 100},
+        )
+        for unit in self.plugin.TIME_UNITS:
+            self.devices[unit].Update.assert_called_once_with(
+                nValue=0, sValue="0.00", TimedOut=0
+            )
+
+    def test_unchanged_duration_is_refreshed_without_changing_value(self):
+        status = {"printer": {"state": "PRINTING"}}
+        job = {"time_remaining": 120, "time_printing": 60}
+        self.plugin._update_job_times(status, job)
+        self.plugin._update_job_times(status, job)
+        for unit in self.plugin.TIME_UNITS:
+            self.devices[unit].Update.assert_called_once()
+            self.devices[unit].Touch.assert_called_once()
+
+    def test_idle_zero_is_refreshed_and_recovers_timed_out_devices(self):
+        for unit in self.plugin.TIME_UNITS:
+            self.devices[unit]._timed_out = 1
+            self.devices[unit].sValue = "0.00"
+        status = {"printer": {"state": "IDLE"}}
+        self.plugin._update_job_times(status, None)
+        self.plugin._update_job_times(status, None)
+        for unit in self.plugin.TIME_UNITS:
+            self.devices[unit].Update.assert_called_once_with(
+                nValue=0, sValue="0.00", TimedOut=0
+            )
+            self.devices[unit].Touch.assert_called_once()
+
+    def test_unchanged_filename_is_refreshed(self):
+        filename = FakeDevice()
+        self.devices[self.plugin.UNIT_FILENAME] = filename
+        status = {"printer": {"state": "PRINTING"}}
+        job = {"file": {"display_name": "benchy.gcode"}}
+        self.plugin._update_all_devices(status, job)
+        self.plugin._update_all_devices(status, job)
+        filename.Update.assert_called_once_with(nValue=0, sValue="benchy.gcode")
+        filename.Touch.assert_called_once()
 
     def test_device_creation_and_legacy_migration(self):
         created = {}
 
         def create_device(**kwargs):
-            device = Mock()
+            device = FakeDevice()
+            device.Create = Mock()
             device.Create.side_effect = lambda: self.devices.__setitem__(kwargs["Unit"], device)
             created[kwargs["Unit"]] = kwargs
             return device
 
-        legacy = {unit: Mock(TimedOut=0) for unit in self.plugin.LEGACY_TIME_UNITS}
+        legacy = {unit: FakeDevice("1:00:00") for unit in self.plugin.LEGACY_TIME_UNITS}
         self.devices.update(legacy)
-        for unit in self.plugin.TIME_UNITS:
+        for unit in (*self.plugin.TIME_UNITS, self.plugin.UNIT_FINISH_TIME):
             del self.devices[unit]
         with patch.object(plugin, "Parameters", {"Mode2": "host", "Mode3": "key", "Mode4": "Off"}, create=True), \
                 patch.object(plugin.Domoticz, "Device", side_effect=create_device, create=True), \
@@ -105,9 +176,13 @@ class PrintTimeTests(unittest.TestCase):
                 self.assertEqual(created[unit]["Options"], {"Custom": "1;min"})
             for device in legacy.values():
                 self.assertEqual(device.TimedOut, 1)
-                device.Update.assert_not_called()
+                device.Update.assert_called_once_with(
+                    nValue=0, sValue="1:00:00", TimedOut=1, SuppressTriggers=True
+                )
             self.assertNotIn(9, created)
             self.assertNotIn(10, created)
+            self.assertIn(self.plugin.UNIT_FINISH_TIME, created)
+            self.assertIn(self.plugin.UNIT_CONNECTION, created)
 
 
 class ConnectionTests(unittest.TestCase):
@@ -142,7 +217,7 @@ class ConnectionTests(unittest.TestCase):
         self.assertEqual(self.plugin.session.get.call_count, 2)
 
     def test_timeout_marks_unavailable_and_skips_job(self):
-        duration_devices = {unit: Mock(TimedOut=0) for unit in self.plugin.TIME_UNITS}
+        duration_devices = {unit: FakeDevice("12.34") for unit in self.plugin.TIME_UNITS}
         plugin.Devices.update(duration_devices)
         self.plugin.session.get.side_effect = requests.exceptions.Timeout("timeout")
         self.plugin.onHeartbeat()
@@ -150,7 +225,9 @@ class ConnectionTests(unittest.TestCase):
         self.assertEqual(self.plugin.session.get.call_count, 1)
         for device in duration_devices.values():
             self.assertEqual(device.TimedOut, 1)
-            device.Update.assert_not_called()
+            device.Update.assert_called_once_with(
+                nValue=0, sValue="12.34", TimedOut=1, SuppressTriggers=True
+            )
 
     def test_connection_recovers_after_failure(self):
         def update(nValue, sValue):
@@ -194,13 +271,20 @@ class ConnectionTests(unittest.TestCase):
         self.log.assert_any_call("PRUSALINK Invalid JSON from /api/v1/status: invalid JSON")
 
     def test_job_failure_does_not_mark_status_endpoint_offline(self):
+        duration_devices = {unit: FakeDevice("12.34") for unit in self.plugin.TIME_UNITS}
+        plugin.Devices.update(duration_devices)
         self.plugin.session.get.side_effect = [
             self.response(200, {"printer": {"state": "PRINTING"}}),
             self.response(500),
         ]
         self.plugin.onHeartbeat()
         self.alert.Update.assert_not_called()
+        self.alert.Touch.assert_called_once()
         self.log.assert_any_call("PRUSALINK Error fetching /api/v1/job: HTTP 500")
+        for device in duration_devices.values():
+            self.assertEqual(device.sValue, "12.34")
+            self.assertEqual(device.TimedOut, 1)
+            device.Touch.assert_not_called()
 
 
 if __name__ == "__main__":
