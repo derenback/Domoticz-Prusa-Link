@@ -37,9 +37,12 @@ class BasePlugin:
     UNIT_FILENAME = 6
     UNIT_FAN_HOTEND = 7
     UNIT_FAN_PRINT = 8
-    UNIT_TIME_REMAINING = 9
-    UNIT_TIME_ELAPSED = 10
+    LEGACY_TIME_UNITS = (9, 10)
     UNIT_FINISH_TIME = 11
+    UNIT_CONNECTION = 12
+    UNIT_TIME_REMAINING = 13
+    UNIT_TIME_ELAPSED = 14
+    TIME_UNITS = (UNIT_TIME_REMAINING, UNIT_TIME_ELAPSED)
 
     # Domoticz device types and subtypes
     TYPE_TEMPERATURE = 80
@@ -48,10 +51,13 @@ class BasePlugin:
     SUBTYPE_PERCENTAGE = 6
     SUBTYPE_TEXT = 19
     SUBTYPE_FAN = 7
+    SUBTYPE_ALERT = 22
+    SUBTYPE_CUSTOM = 31
 
     HEARTBEAT_SECONDS = 5
     REQUEST_TIMEOUT_SECONDS = 2
     HTTP_OK = 200
+    HTTP_NO_CONTENT = 204
     DEVICE_USED = 1
     UPDATE_VALUE = 1
     NO_UPDATE_VALUE = 0
@@ -59,6 +65,8 @@ class BasePlugin:
     NO_FILE = "No file"
     NO_JOB = "No job"
     TIME_UNAVAILABLE = "Unavailable"
+    CONNECTION_OK = 0
+    CONNECTION_ERROR = 4
 
     # Device configuration: unit -> (name, type, subtype)
     DEVICES = {
@@ -70,9 +78,10 @@ class BasePlugin:
         UNIT_FILENAME: ("Filename", TYPE_GENERAL, SUBTYPE_TEXT),
         UNIT_FAN_HOTEND: ("Fan hotend", TYPE_GENERAL, SUBTYPE_FAN),
         UNIT_FAN_PRINT: ("Fan print", TYPE_GENERAL, SUBTYPE_FAN),
-        UNIT_TIME_REMAINING: ("Time remaining", TYPE_GENERAL, SUBTYPE_TEXT),
-        UNIT_TIME_ELAPSED: ("Time elapsed", TYPE_GENERAL, SUBTYPE_TEXT),
+        UNIT_TIME_REMAINING: ("Time remaining", TYPE_GENERAL, SUBTYPE_CUSTOM),
+        UNIT_TIME_ELAPSED: ("Time elapsed", TYPE_GENERAL, SUBTYPE_CUSTOM),
         UNIT_FINISH_TIME: ("Estimated finish", TYPE_GENERAL, SUBTYPE_TEXT),
+        UNIT_CONNECTION: ("Connection", TYPE_GENERAL, SUBTYPE_ALERT),
     }
     
     # API endpoints
@@ -106,13 +115,20 @@ class BasePlugin:
         # Create devices
         for unit, (name, type_val, subtype) in self.DEVICES.items():
             if unit not in Devices:
-                Domoticz.Device(
-                    Name=name,
-                    Unit=unit,
-                    Type=type_val,
-                    Subtype=subtype,
-                    Used=self.DEVICE_USED,
-                ).Create()
+                config = {
+                    "Name": name, "Unit": unit, "Type": type_val,
+                    "Subtype": subtype, "Used": self.DEVICE_USED,
+                }
+                if unit in self.TIME_UNITS:
+                    config["Options"] = {"Custom": "1;min"}
+                Domoticz.Device(**config).Create()
+            if unit in self.TIME_UNITS and unit in Devices:
+                Devices[unit].TimedOut = 1
+
+        for unit in self.LEGACY_TIME_UNITS:
+            if unit in Devices:
+                Devices[unit].TimedOut = 1
+                Domoticz.Log(f"PRUSALINK Legacy time device {unit} is no longer updated; see README for migration")
         
         Domoticz.Heartbeat(self.HEARTBEAT_SECONDS)
 
@@ -127,10 +143,18 @@ class BasePlugin:
         
         try:
             printer_data = self._fetch_api(self.STATUS_ENDPOINT)
+            if not isinstance(printer_data, dict) or not isinstance(printer_data.get('printer'), dict) \
+                    or not isinstance(printer_data['printer'].get('state'), str) \
+                    or not printer_data['printer']['state']:
+                if printer_data is not None:
+                    Domoticz.Log("PRUSALINK Invalid status response: printer state missing")
+                self._update_connection(False)
+                self._mark_times_unavailable()
+                return
+
+            self._update_connection(True)
             job_data = self._fetch_api(self.JOB_ENDPOINT)
-            
-            if printer_data:
-                self._update_all_devices(printer_data, job_data)
+            self._update_all_devices(printer_data, job_data)
                 
         except Exception as e:
             Domoticz.Log(f"PRUSALINK Error in heartbeat: {e}")
@@ -142,10 +166,27 @@ class BasePlugin:
                 f"http://{self.ip_address}{endpoint}",
                 timeout=self.REQUEST_TIMEOUT_SECONDS,
             )
-            return response.json() if response.status_code == self.HTTP_OK else None
+            if response.status_code == self.HTTP_OK:
+                return response.json()
+            if endpoint == self.JOB_ENDPOINT and response.status_code == self.HTTP_NO_CONTENT:
+                return None
+            Domoticz.Log(f"PRUSALINK Error fetching {endpoint}: HTTP {response.status_code}")
+            return None
         except requests.exceptions.RequestException as e:
             Domoticz.Log(f"PRUSALINK Error fetching {endpoint}: {e}")
             return None
+        except ValueError as e:
+            Domoticz.Log(f"PRUSALINK Invalid JSON from {endpoint}: {e}")
+            return None
+
+    def _update_connection(self, connected):
+        value = self.CONNECTION_OK if connected else self.CONNECTION_ERROR
+        message = "Connected" if connected else "PrusaLink unavailable"
+        if self.UNIT_CONNECTION in Devices:
+            device = Devices[self.UNIT_CONNECTION]
+            if device.nValue != value or device.sValue != message:
+                device.Update(nValue=value, sValue=message)
+                Domoticz.Log(f"PRUSALINK {message}")
 
     def _update_all_devices(self, status_data, job_data):
         """Update all devices with latest data"""
@@ -187,8 +228,8 @@ class BasePlugin:
         remaining = self._valid_seconds(job.get('time_remaining'))
         elapsed = self._valid_seconds(job.get('time_printing'))
 
-        self._update_device(self.UNIT_TIME_REMAINING, self._format_duration(remaining))
-        self._update_device(self.UNIT_TIME_ELAPSED, self._format_duration(elapsed))
+        self._update_duration(self.UNIT_TIME_REMAINING, remaining)
+        self._update_duration(self.UNIT_TIME_ELAPSED, elapsed)
 
         finish = self.TIME_UNAVAILABLE
         if remaining is not None and status_data.get('printer', {}).get('state') == 'PRINTING':
@@ -204,12 +245,18 @@ class BasePlugin:
             return int(value)
         return None
 
-    def _format_duration(self, seconds):
+    def _mark_times_unavailable(self):
+        for unit in self.TIME_UNITS:
+            if unit in Devices:
+                Devices[unit].TimedOut = 1
+
+    def _update_duration(self, unit, seconds):
+        if unit not in Devices:
+            return
         if seconds is None:
-            return self.TIME_UNAVAILABLE
-        hours, remainder = divmod(seconds, 3600)
-        minutes, seconds = divmod(remainder, 60)
-        return f"{hours}:{minutes:02d}:{seconds:02d}"
+            Devices[unit].TimedOut = 1
+        else:
+            Devices[unit].Update(nValue=0, sValue=f"{seconds / 60:.2f}", TimedOut=0)
 
     def _update_device(self, unit, value):
         """Generic device update method"""

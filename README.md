@@ -9,6 +9,7 @@ A Domoticz plugin to monitor Prusa 3D printers via PrusaLink API.
 - Track print progress percentage
 - Display current filename being printed
 - Show elapsed time, remaining time and estimated finish time
+- Monitor PrusaLink connection availability with a Domoticz alert
 - Real-time updates every 5 seconds
 - Debug logging support
 
@@ -77,13 +78,36 @@ The plugin creates the following devices in Domoticz:
 6. **Filename** - Currently printing filename
 7. **Fan hotend** - Hotend fan speed (rpm)
 8. **Fan print** - Print fan speed (rpm)
-9. **Time remaining** - Estimated remaining time (hours:minutes:seconds)
-10. **Time elapsed** - Elapsed print time (hours:minutes:seconds)
 11. **Estimated finish** - Estimated local finish date and time
+12. **Connection** - Alert: connected or PrusaLink unavailable
+13. **Time remaining** - Estimated remaining time (numeric, minutes)
+14. **Time elapsed** - Elapsed print time (numeric, minutes)
 
-Time values are shown as "Unavailable" when not provided by the printer. The
-finish time is shown only while printing and is an estimate based on the
-remaining time, which can change during a print.
+When a duration is unavailable, its numeric device is marked timed out (red
+header) and retains its last reading; the value may be stale and should not be
+treated as zero. Check the timeout state when using it in automations. New
+devices can show an initial zero before their first reading, also marked timed
+out. The finish time is shown as "Unavailable" unless the printer is printing
+and provides a remaining time. It is an estimate and can change during a print.
+
+### Upgrading time devices
+
+The numeric duration sensors use new device units (13 and 14). Previous text
+devices (9 and 10) are left in place but marked timed out and no longer
+updated. Update dashboards and automations to use the new devices; remove the
+old devices in Domoticz only if their history and configuration are no longer
+needed.
+
+Domoticz supports custom device icons. Where available, choose a clock icon in
+the device's Edit dialog, or upload a custom clock icon. The plugin does not
+assign an icon ID because available icons depend on the Domoticz installation.
+
+Connection checks use the printer status endpoint. The alert reports an
+unavailable PrusaLink for network, authentication, HTTP or invalid-response
+errors; check the Domoticz log for details. An idle printer or an absent job
+does not trigger the alert. Configure notifications on the alert device in
+Domoticz if desired. Device readings retain their last values while PrusaLink
+is unavailable; the duration devices are also marked timed out.
 
 ## Usage
 
