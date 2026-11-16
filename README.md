@@ -83,15 +83,16 @@ The plugin creates the following devices in Domoticz:
 13. **Time remaining** - Estimated remaining time (numeric, minutes)
 14. **Time elapsed** - Elapsed print time (numeric, minutes)
 
-When the printer is idle or a print is stopped, durations reset to zero.
+When the printer is idle, ready or a print is stopped, durations reset to zero.
 Unchanged duration and connection readings are refreshed so they do not
 become stale. When a duration is unavailable during a job, its numeric device
 is marked timed out (red header) and retains its last reading; the value may be
 stale and should not be treated as zero. Check the timeout state when using it
-in automations. New devices can show an initial zero before their first reading,
-also marked timed out. The finish time is shown as "Unavailable" unless the
-printer is printing and provides a remaining time. It is an estimate and can
-change during a print.
+in automations. New devices start at zero until the first printer check; this
+is a placeholder, not a confirmed reading. Existing readings are marked
+unavailable until the first successful check. The finish time is shown as
+"Unavailable" unless the printer is printing and provides a remaining time.
+It is an estimate and can change during a print.
 
 ### Upgrading time devices
 

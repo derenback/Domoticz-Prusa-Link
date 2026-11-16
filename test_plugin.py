@@ -107,6 +107,15 @@ class PrintTimeTests(unittest.TestCase):
             self.assertEqual(self.devices[unit].TimedOut, 0)
         self.assertEqual(self.value(self.plugin.UNIT_FINISH_TIME), "Unavailable")
 
+    def test_ready_resets_previous_times(self):
+        for unit in self.plugin.TIME_UNITS:
+            self.devices[unit].sValue = "12.34"
+        self.plugin._update_job_times({"printer": {"state": "READY"}}, None)
+        for unit in self.plugin.TIME_UNITS:
+            self.devices[unit].Update.assert_called_once_with(
+                nValue=0, sValue="0.00", TimedOut=0
+            )
+
     def test_stopped_job_resets_even_if_api_returns_old_job(self):
         self.plugin._update_job_times(
             {"printer": {"state": "STOPPED"}, "job": {"time_remaining": 200}},
@@ -170,7 +179,10 @@ class PrintTimeTests(unittest.TestCase):
             self.plugin.onStart()
             self.plugin.onStop()
             for unit in self.plugin.TIME_UNITS:
-                self.assertEqual(self.devices[unit].TimedOut, 1)
+                self.assertEqual(self.devices[unit].TimedOut, 0)
+                self.devices[unit].Update.assert_called_once_with(
+                    nValue=0, sValue="0.00", TimedOut=0
+                )
                 self.assertEqual(created[unit]["Type"], self.plugin.TYPE_GENERAL)
                 self.assertEqual(created[unit]["Subtype"], self.plugin.SUBTYPE_CUSTOM)
                 self.assertEqual(created[unit]["Options"], {"Custom": "1;min"})
@@ -183,6 +195,27 @@ class PrintTimeTests(unittest.TestCase):
             self.assertNotIn(10, created)
             self.assertIn(self.plugin.UNIT_FINISH_TIME, created)
             self.assertIn(self.plugin.UNIT_CONNECTION, created)
+
+    def test_existing_times_are_preserved_until_ready_status(self):
+        for unit in self.plugin.TIME_UNITS:
+            self.devices[unit].sValue = "12.34"
+        status_response = Mock(status_code=200)
+        status_response.json.return_value = {"printer": {"state": "READY"}}
+        session = Mock()
+        session.get.side_effect = [status_response, Mock(status_code=204)]
+        with patch.object(plugin, "Parameters", {"Mode2": "host", "Mode3": "key", "Mode4": "Off"}, create=True), \
+                patch.object(plugin.Domoticz, "Device", return_value=Mock(), create=True), \
+                patch.object(plugin.Domoticz, "Log", create=True), \
+                patch.object(plugin.Domoticz, "Heartbeat", create=True), \
+                patch.object(plugin.requests, "Session", return_value=session):
+            self.plugin.onStart()
+            for unit in self.plugin.TIME_UNITS:
+                self.assertEqual(self.devices[unit].sValue, "12.34")
+                self.assertEqual(self.devices[unit].TimedOut, 1)
+            self.plugin.onHeartbeat()
+        for unit in self.plugin.TIME_UNITS:
+            self.assertEqual(self.devices[unit].sValue, "0.00")
+            self.assertEqual(self.devices[unit].TimedOut, 0)
 
 
 class ConnectionTests(unittest.TestCase):

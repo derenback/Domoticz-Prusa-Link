@@ -122,7 +122,9 @@ class BasePlugin:
                 if unit in self.TIME_UNITS:
                     config["Options"] = {"Custom": "1;min"}
                 Domoticz.Device(**config).Create()
-            if unit in self.TIME_UNITS and unit in Devices:
+                if unit in self.TIME_UNITS and unit in Devices:
+                    Devices[unit].Update(nValue=0, sValue="0.00", TimedOut=0)
+            elif unit in self.TIME_UNITS:
                 self._mark_device_unavailable(unit)
 
         for unit in self.LEGACY_TIME_UNITS:
@@ -230,7 +232,7 @@ class BasePlugin:
         status_job = status_data.get('job') or {}
         job = job_data or status_job
         state = status_data.get('printer', {}).get('state')
-        if state in ('IDLE', 'STOPPED'):
+        if state in ('IDLE', 'READY', 'STOPPED'):
             remaining = elapsed = 0
         else:
             remaining = self._valid_seconds(job.get('time_remaining'))
