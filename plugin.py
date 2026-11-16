@@ -23,6 +23,9 @@ Author: Derenback
 import Domoticz
 import requests
 import json
+import math
+import time
+from datetime import datetime
 
 class BasePlugin:
     # Domoticz device units
@@ -34,6 +37,9 @@ class BasePlugin:
     UNIT_FILENAME = 6
     UNIT_FAN_HOTEND = 7
     UNIT_FAN_PRINT = 8
+    UNIT_TIME_REMAINING = 9
+    UNIT_TIME_ELAPSED = 10
+    UNIT_FINISH_TIME = 11
 
     # Domoticz device types and subtypes
     TYPE_TEMPERATURE = 80
@@ -52,6 +58,7 @@ class BasePlugin:
     DEFAULT_SENSOR_VALUE = 0
     NO_FILE = "No file"
     NO_JOB = "No job"
+    TIME_UNAVAILABLE = "Unavailable"
 
     # Device configuration: unit -> (name, type, subtype)
     DEVICES = {
@@ -63,6 +70,9 @@ class BasePlugin:
         UNIT_FILENAME: ("Filename", TYPE_GENERAL, SUBTYPE_TEXT),
         UNIT_FAN_HOTEND: ("Fan hotend", TYPE_GENERAL, SUBTYPE_FAN),
         UNIT_FAN_PRINT: ("Fan print", TYPE_GENERAL, SUBTYPE_FAN),
+        UNIT_TIME_REMAINING: ("Time remaining", TYPE_GENERAL, SUBTYPE_TEXT),
+        UNIT_TIME_ELAPSED: ("Time elapsed", TYPE_GENERAL, SUBTYPE_TEXT),
+        UNIT_FINISH_TIME: ("Estimated finish", TYPE_GENERAL, SUBTYPE_TEXT),
     }
     
     # API endpoints
@@ -169,6 +179,37 @@ class BasePlugin:
             progress = self.DEFAULT_SENSOR_VALUE
 
         self._update_device(self.UNIT_PROGRESS, progress)
+        self._update_job_times(status_data, job_data)
+
+    def _update_job_times(self, status_data, job_data):
+        status_job = status_data.get('job') or {}
+        job = job_data or status_job
+        remaining = self._valid_seconds(job.get('time_remaining'))
+        elapsed = self._valid_seconds(job.get('time_printing'))
+
+        self._update_device(self.UNIT_TIME_REMAINING, self._format_duration(remaining))
+        self._update_device(self.UNIT_TIME_ELAPSED, self._format_duration(elapsed))
+
+        finish = self.TIME_UNAVAILABLE
+        if remaining is not None and status_data.get('printer', {}).get('state') == 'PRINTING':
+            try:
+                finish = datetime.fromtimestamp(time.time() + remaining).strftime('%Y-%m-%d %H:%M')
+            except (OverflowError, OSError, ValueError) as e:
+                Domoticz.Log(f"PRUSALINK Invalid estimated finish time: {e}")
+        self._update_device(self.UNIT_FINISH_TIME, finish)
+
+    @staticmethod
+    def _valid_seconds(value):
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value >= 0:
+            return int(value)
+        return None
+
+    def _format_duration(self, seconds):
+        if seconds is None:
+            return self.TIME_UNAVAILABLE
+        hours, remainder = divmod(seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        return f"{hours}:{minutes:02d}:{seconds:02d}"
 
     def _update_device(self, unit, value):
         """Generic device update method"""

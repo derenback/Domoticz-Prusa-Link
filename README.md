@@ -8,6 +8,7 @@ A Domoticz plugin to monitor Prusa 3D printers via PrusaLink API.
 - Monitor nozzle temperature and target temperature  
 - Track print progress percentage
 - Display current filename being printed
+- Show elapsed time, remaining time and estimated finish time
 - Real-time updates every 5 seconds
 - Debug logging support
 
@@ -76,6 +77,13 @@ The plugin creates the following devices in Domoticz:
 6. **Filename** - Currently printing filename
 7. **Fan hotend** - Hotend fan speed (rpm)
 8. **Fan print** - Print fan speed (rpm)
+9. **Time remaining** - Estimated remaining time (hours:minutes:seconds)
+10. **Time elapsed** - Elapsed print time (hours:minutes:seconds)
+11. **Estimated finish** - Estimated local finish date and time
+
+Time values are shown as "Unavailable" when not provided by the printer. The
+finish time is shown only while printing and is an estimate based on the
+remaining time, which can change during a print.
 
 ## Usage
 
